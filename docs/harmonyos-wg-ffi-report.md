@@ -145,19 +145,7 @@ UIAbility
 
 “VPN 已连接”、能 ping 或看到握手都不能替代真实业务端口验证。
 
-## 7. 公开发布安全要求
 
-公开仓库应排除：
-
-- WireGuard PrivateKey 和 PresharedKey。
-- 真实 Endpoint、内网 CIDR、服务地址和抓包。
-- 华为开发者证书、私钥、CSR、Provision Profile。
-- 与具体调试设备绑定的签名 HAP。
-- UDID、工单号、账号信息和本地绝对路径。
-- 含上述内容的旧 Git 历史。
-
-推荐从经过审计的工作树创建一个新的单提交仓库，再推送到 GitHub；不要把
-私有仓库的所有分支、标签和历史直接镜像到公共平台。
 
 ## 8. 上游归属
 
