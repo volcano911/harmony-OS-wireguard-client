@@ -1,0 +1,45 @@
+# HarmonyOS build
+build/
+.hvigor/
+.idea/
+.gradle/
+local.properties
+*.iml
+
+# OHOS signing (contains private keys)
+build-profile.json5
+entry/build-profile.json5
+*.cer
+*.p7b
+*.p12
+*.pfx
+*.pem
+*.key
+*.csr
+*.prof
+*.profile
+*.provision
+
+# Build and signed application artifacts
+dist/
+*.hap
+*.hsp
+*.app
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# Temp
+*.log
+/tmp/
+nul
+entry/.cxx/

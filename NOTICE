@@ -1,0 +1,22 @@
+Upstream attribution
+====================
+
+Original author and upstream maintainer:
+
+  wan0791
+  https://github.com/wan0791
+
+Original project:
+
+  wan0791/harmonyos-wg-client
+  https://github.com/wan0791/harmonyos-wg-client
+
+The original HarmonyOS WireGuard client implementation and its historical
+contributions remain the work of the upstream author and contributors.
+
+This public version adds and documents HarmonyOS API 23 adaptations for native
+TUN polling and I/O, RouteInfo construction, native UDP transport, packet
+ordering, and VpnExtension lifecycle handling. These adaptations are continued
+work built on the upstream project's results and do not replace its attribution.
+
+The project is distributed under the MIT License included in LICENSE.
