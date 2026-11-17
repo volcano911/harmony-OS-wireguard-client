@@ -16,6 +16,20 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(DOMAIN, 'WgClient', 'Ability onWindowStageCreate');
     windowStage.loadContent('pages/Index');
+
+    // 状态栏 / 导航栏跟随浅色分组底色，深色图标，避免顶部出现一块系统灰
+    try {
+      const win: window.Window = windowStage.getMainWindowSync();
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#F2F2F7',
+        statusBarContentColor: '#000000',
+        navigationBarColor: '#F2F2F7',
+        navigationBarContentColor: '#000000',
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, 'WgClient', 'setWindowSystemBarProperties failed: %{public}s',
+        JSON.stringify(err));
+    }
   }
 
   onWindowStageDestroy(): void {

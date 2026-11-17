@@ -6,6 +6,12 @@
 [harmonyos-wg-client](https://github.com/wan0791/harmonyos-wg-client)
 项目继续开发，不包含任何真实服务器、内网、设备或签名信息。
 
+> [!NOTE]
+> 本文是 API 23 适配过程中的排查记录，保留原始结论与证据链。其中「原生
+> 线程读 TUN 后交给 ArkTS 队列处理」的描述属于 1.3.0 之前的实现；自 1.3.0
+> 起整条数据面（握手、加解密、TUN 读写、UDP 收发）已收拢到 C 单线程内，
+> 不再跨 NAPI 传递数据包。当前实现见 [README](../README.md) 的架构一节。
+
 ## 1. 问题边界
 
 WireGuard 握手成功并不代表应用流量已经进入隧道。排查时应分层验证：

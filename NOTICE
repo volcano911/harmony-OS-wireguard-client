@@ -11,12 +11,25 @@ Original project:
   wan0791/harmonyos-wg-client
   https://github.com/wan0791/harmonyos-wg-client
 
+Direct baseline this repository continues from:
+
+  wumingkaiyuan/HarmonyOS-WireGuard-VPN-Client
+  https://github.com/wumingkaiyuan/HarmonyOS-WireGuard-VPN-Client
+
+  That repository contains the sanitized HarmonyOS API 23 adaptation work,
+  including native TUN polling, RouteInfo construction and VpnExtension
+  lifecycle handling, and is itself based on wan0791/harmonyos-wg-client.
+
 The original HarmonyOS WireGuard client implementation and its historical
 contributions remain the work of the upstream author and contributors.
 
-This public version adds and documents HarmonyOS API 23 adaptations for native
-TUN polling and I/O, RouteInfo construction, native UDP transport, packet
-ordering, and VpnExtension lifecycle handling. These adaptations are continued
-work built on the upstream project's results and do not replace its attribution.
+Changes made on top of the baseline: the handshake and transport path was
+moved out of ArkTS into a single-threaded C data plane (Noise IKpsk2, AEAD,
+replay window, TUN/UDP poll loop), the UDP socket was switched from a
+connected socket to sendto/recvfrom with post-authentication endpoint
+roaming to survive NAT hairpin source rewriting, network-change recovery was
+added to the VpnExtension, and the profile management and status UI was
+rewritten. These are continued work built on the upstream project's results
+and do not replace its attribution.
 
 The project is distributed under the MIT License included in LICENSE.

@@ -26,6 +26,10 @@ dist/
 *.hsp
 *.app
 
+# Exception: the unsigned release packages are published on purpose so that
+# people without a HarmonyOS toolchain can grab a build and sign it locally.
+!release/*.hap
+
 # Node
 node_modules/
 

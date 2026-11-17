@@ -1,5 +1,5 @@
 /**
- * QR 码扫描页面
+ * QR 码扫描页面 —— 浅色 iOS 风格
  * - 系统原生相机扫码（ScanKit startScanForResult）
  * - 相册选图扫码
  */
@@ -10,7 +10,18 @@ import { picker } from '@kit.CoreFileKit';
 import { router } from '@kit.ArkUI';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { decodeQrCode, PixelData } from '../utils/QrDecoder';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, pasteboard as pasteboardNs } from '@kit.BasicServicesKit';
+
+const C_BG: string = '#F2F2F7';
+const C_CARD: string = '#FFFFFF';
+const C_FILL: string = '#EFEFF4';
+const C_HAIR: string = '#E4E4E9';
+const C_TEXT: string = '#111114';
+const C_SUB: string = '#8A8A8E';
+const C_DIM: string = '#C3C3C8';
+const C_BLUE: string = '#007AFF';
+const C_BLUE_SOFT: string = '#EAF2FF';
+const C_GREEN: string = '#34C759';
 
 @Entry
 @Component
@@ -27,72 +38,163 @@ struct ScanPage {
 
   build() {
     Column() {
+      // 导航栏
       Row() {
-        Button('< 返回')
-          .fontSize(16).fontColor('#e2e8f0').backgroundColor('transparent')
+        Text('返回')
+          .fontSize(16)
+          .fontColor(C_BLUE)
+          .padding({ right: 12, top: 6, bottom: 6 })
           .onClick(() => { router.back(); })
-        Text('二维码扫描').fontSize(18).fontWeight(700).fontColor('#ffffff')
-          .layoutWeight(1).textAlign(TextAlign.Center)
-        Blank().width(60)
+        Blank()
+        Text('扫码导入')
+          .fontSize(17)
+          .fontWeight(600)
+          .fontColor(C_TEXT)
+        Blank()
+        Text('返回')
+          .fontSize(16)
+          .fontColor(Color.Transparent)
+          .padding({ left: 12, top: 6, bottom: 6 })
       }
-      .width('100%').padding({ top: 12, bottom: 8, left: 8, right: 8 })
+      .width('100%')
+      .padding({ top: 8, bottom: 8, left: 16, right: 16 })
 
-      // 预览区
-      Column() {
-        Column()
-          .width(260).height(260)
-          .border({ width: 3, color: this.decoded ? '#48bb78' : '#3b7bbf' })
-          .borderRadius(16).backgroundColor('#1a202c')
-          .justifyContent(FlexAlign.Center)
-        Text(this.statusMsg)
-          .fontSize(13).fontColor('#e2e8f0').margin({ top: 16 })
-          .textAlign(TextAlign.Center)
-      }
-      .width('100%').height(330)
-      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
-      .backgroundColor('#0d1117')
-
-      // 解码结果
-      if (this.scanResult) {
+      Scroll() {
         Column() {
-          Text('✅ 解码成功').fontSize(14).fontColor('#48bb78').margin({ bottom: 8 })
-          Text(this.scanResult)
-            .fontSize(11).fontColor('#a0aec0').width('100%').maxLines(8)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .backgroundColor('#161b22').borderRadius(8).padding(10)
-        }
-        .width('100%').margin({ top: 8 }).padding({ left: 16, right: 16 })
-      }
+          // 取景框
+          Column() {
+            Stack() {
+              Column()
+                .width(196)
+                .height(196)
+                .backgroundColor(this.decoded ? '#EAF9EE' : C_BLUE_SOFT)
+                .borderRadius(22)
+                .border({ width: 2, color: this.decoded ? C_GREEN : C_BLUE })
 
-      // 按钮
+              // 四角标记，比整圈描边更像取景器
+              Text(this.decoded ? '✓' : '⌗')
+                .fontSize(this.decoded ? 62 : 44)
+                .fontWeight(300)
+                .fontColor(this.decoded ? C_GREEN : C_BLUE)
+            }
+            .width(196)
+            .height(196)
+
+            Text(this.statusMsg)
+              .fontSize(14)
+              .fontColor(C_SUB)
+              .margin({ top: 18 })
+              .textAlign(TextAlign.Center)
+
+            Text('把二维码放进框内，或直接从相册选一张')
+              .fontSize(12)
+              .fontColor(C_DIM)
+              .margin({ top: 6 })
+              .textAlign(TextAlign.Center)
+          }
+          .width('100%')
+          .padding({ top: 34, bottom: 30 })
+          .backgroundColor(C_CARD)
+          .borderRadius(24)
+          .shadow({ radius: 14, color: '#0D000000', offsetX: 0, offsetY: 3 })
+
+          // 解码结果
+          if (this.scanResult) {
+            Column() {
+              Row() {
+                Text('已识别')
+                  .fontSize(13)
+                  .fontWeight(500)
+                  .fontColor(C_GREEN)
+                  .layoutWeight(1)
+                Text('复制')
+                  .fontSize(13)
+                  .fontColor(C_BLUE)
+                  .onClick(() => { this.copyConfig(); })
+              }
+              .width('100%')
+              .margin({ bottom: 8 })
+
+              Text(this.scanResult)
+                .fontSize(12)
+                .fontColor(C_SUB)
+                .width('100%')
+                .maxLines(8)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .width('100%')
+            .padding(14)
+            .backgroundColor(C_CARD)
+            .borderRadius(16)
+            .margin({ top: 14 })
+            .shadow({ radius: 10, color: '#0A000000', offsetX: 0, offsetY: 2 })
+          }
+        }
+        .width('100%')
+        .constraintSize({ maxWidth: 620 })
+      }
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .align(Alignment.Top)
+
+      // 底部操作
       Column() {
-        Button('📷 相机扫码')
-          .width('100%').height(48).fontSize(16)
-          .fontColor('#ffffff').backgroundColor('#3b7bbf').borderRadius(10)
-          .margin({ top: 8 })
+        Button('相机扫码')
+          .width('100%')
+          .height(50)
+          .fontSize(16)
+          .fontWeight(600)
+          .fontColor('#FFFFFF')
+          .backgroundColor(C_BLUE)
+          .borderRadius(14)
           .onClick(() => { this.startScan(); })
 
-        Button('🖼 从相册选择')
-          .width('100%').height(48).fontSize(16)
-          .fontColor('#ffffff').backgroundColor('#2d3748').borderRadius(10)
-          .margin({ top: 8 })
+        Button('从相册选择')
+          .width('100%')
+          .height(50)
+          .fontSize(16)
+          .fontColor(C_BLUE)
+          .backgroundColor(C_CARD)
+          .borderRadius(14)
+          .margin({ top: 10 })
           .onClick(() => { this.pickFromAlbum(); })
 
         if (this.scanResult) {
-          Button('✅ 使用此配置')
-            .width('100%').height(48).fontSize(16)
-            .fontColor('#ffffff').backgroundColor('#48bb78').borderRadius(10)
-            .margin({ top: 8 })
+          Button('使用此配置')
+            .width('100%')
+            .height(50)
+            .fontSize(16)
+            .fontWeight(600)
+            .fontColor('#FFFFFF')
+            .backgroundColor(C_GREEN)
+            .borderRadius(14)
+            .margin({ top: 10 })
             .onClick(() => {
               AppStorage.setOrCreate<string>('scanResult', this.scanResult);
               router.back();
             })
         }
       }
-      .width('100%').padding({ left: 16, right: 16, bottom: 16 })
-      .layoutWeight(1).backgroundColor('#0d1117')
+      .width('100%')
+      .constraintSize({ maxWidth: 620 })
+      .padding({ left: 18, right: 18, top: 10, bottom: 20 })
     }
-    .width('100%').height('100%').backgroundColor('#0d1117')
+    .width('100%')
+    .height('100%')
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor(C_BG)
+  }
+
+  private copyConfig(): void {
+    try {
+      const pasteboard = pasteboardNs.getSystemPasteboard();
+      const data = pasteboardNs.createData(pasteboardNs.MIMETYPE_TEXT_PLAIN, this.scanResult);
+      pasteboard.setData(data).then(() => {
+        this.statusMsg = '配置已复制到剪贴板';
+      }).catch(() => {});
+    } catch (e) {
+      // 复制失败不影响主流程
+    }
   }
 
   // ── 系统原生相机扫码 ──
@@ -105,7 +207,7 @@ struct ScanPage {
         await scanBarcode.startScanForResult(context, this.scanOptions);
 
       this.scanResult = result.originalValue;
-      this.statusMsg = '✅ 扫码成功！';
+      this.statusMsg = '扫码成功';
       this.decoded = true;
     } catch (err) {
       const bizErr: BusinessError = err as BusinessError;
@@ -165,10 +267,10 @@ struct ScanPage {
 
       if (qrResult.success) {
         this.scanResult = qrResult.text;
-        this.statusMsg = '✅ QR 码解码成功！';
+        this.statusMsg = 'QR 码解码成功';
         this.decoded = true;
       } else {
-        this.statusMsg = '❌ ' + (qrResult.error || '未找到有效 QR 码');
+        this.statusMsg = qrResult.error || '未找到有效 QR 码';
       }
     } catch (err) {
       this.statusMsg = '解码失败';

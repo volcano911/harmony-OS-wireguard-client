@@ -46,7 +46,9 @@ export DEVECO_SDK_HOME="${SDK_ROOT}"
   --no-incremental
 
 SOURCE_HAP="entry/build/default/outputs/default/entry-default-unsigned.hap"
-OUTPUT_NAME="harmonyos-wg-client-1.0.0-api23-arm64-${BUILD_MODE}-unsigned.hap"
+APP_VERSION="$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' AppScope/app.json5 | head -n 1)"
+APP_VERSION="${APP_VERSION:-0.0.0}"
+OUTPUT_NAME="harmonyos-wg-client-${APP_VERSION}-api23-arm64-${BUILD_MODE}-unsigned.hap"
 
 if [[ ! -f "${SOURCE_HAP}" ]]; then
   echo "Expected unsigned HAP not found: ${SOURCE_HAP}" >&2
@@ -54,8 +56,14 @@ if [[ ! -f "${SOURCE_HAP}" ]]; then
 fi
 
 unzip -tq "${SOURCE_HAP}" >/dev/null
-if ! unzip -l "${SOURCE_HAP}" | grep -q "libs/arm64-v8a/libudp_socket.so"; then
-  echo "Native library missing from HAP: libs/arm64-v8a/libudp_socket.so" >&2
+
+HAP_LISTING="$(unzip -l "${SOURCE_HAP}")"
+if ! grep -q "libs/arm64-v8a/libwg_tunnel.so" <<< "${HAP_LISTING}"; then
+  echo "Native library missing from HAP: libs/arm64-v8a/libwg_tunnel.so" >&2
+  exit 1
+fi
+if grep -q "libudp_socket.so" <<< "${HAP_LISTING}"; then
+  echo "Stale relay library found in HAP: libudp_socket.so" >&2
   exit 1
 fi
 
