@@ -91,6 +91,8 @@ export default class WireGuardVpnExtAbility extends VpnExtensionAbility {
   private statsTimer: number = -1;
   private statsPath: string = '';
   private started: boolean = false;
+  /** bringUp 正在进行中（首个 await 之前置位），用来拦重复 onRequest */
+  private starting: boolean = false;
 
   // ── 网络切换自动恢复 ──
   // WiFi ↔ 蜂窝切换后，native 那只 UDP socket 还绑在上一个物理网络上，
@@ -106,8 +108,15 @@ export default class WireGuardVpnExtAbility extends VpnExtensionAbility {
   }
 
   async onRequest(want: Want, startId: number): Promise<void> {
-    if (this.started) {
-      hilog.warn(DOMAIN, TAG, 'already running, ignoring duplicate start');
+    /*
+     * 两道门。started 拦「已经连上还再点」，starting 拦「上一次 bringUp 还在
+     * await 里没回来」。少了后者，系统连发两次 onRequest 会让两份 bringUp 交错：
+     * 第二个 create 抢不到系统 VPN 连接、或者 native 返回 -16，接着 catch 里的
+     * tearDown 把第一个刚建好的 TUN 和引擎一起拆掉——表现就是「点连接 → 亮一下
+     * 已连接 → 立刻断开」，再点一次才正常。
+     */
+    if (this.started || this.starting) {
+      hilog.warn(DOMAIN, TAG, 'start in progress or already running, ignoring');
       return;
     }
 
@@ -133,6 +142,7 @@ export default class WireGuardVpnExtAbility extends VpnExtensionAbility {
       return;
     }
 
+    this.starting = true;
     try {
       await this.bringUp(serverIP, serverPort, tun, dnsServer, allowedIps,
         clientPrivB64, serverPubB64, pskB64);
@@ -143,6 +153,8 @@ export default class WireGuardVpnExtAbility extends VpnExtensionAbility {
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'bring-up failed: %{public}s', JSON.stringify(err));
       await this.tearDown();
+    } finally {
+      this.starting = false;
     }
   }
 
@@ -317,6 +329,20 @@ export default class WireGuardVpnExtAbility extends VpnExtensionAbility {
   private async tearDown(): Promise<void> {
     this.unwatchNetwork();
     this.lastCfg = null;
+    /*
+     * bring-up 早期失败时 startStatsWriter 还没跑过，statsPath 是空的，
+     * writeStats 会直接 return —— 上一轮留下的 running=true 就永远清不掉，
+     * 下次启动 UI 读到它先亮「已连接」。所以这里先把路径兜底出来。
+     */
+    if (!this.statsPath) {
+      try {
+        this.statsPath =
+          this.context.getApplicationContext().filesDir + '/' + STATS_FILE;
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'no stats path in tearDown: %{public}s',
+          JSON.stringify(err));
+      }
+    }
     if (this.statsTimer >= 0) {
       clearInterval(this.statsTimer);
       this.statsTimer = -1;

@@ -39,6 +39,10 @@ const COMPACT_HEIGHT_VP: number = 560;
 const WIDE_WIDTH_VP: number = 600;
 /** 统计文件超过这个时间没更新，视为扩展已退出 */
 const STATS_STALE_MS: number = 6000;
+/** 判断「这份统计是本轮写的」时允许的时钟抖动 */
+const STATS_CLOCK_SLACK_MS: number = 1000;
+/** 点连接后等扩展写出第一份统计的宽限期，超时才认定扩展没起来 */
+const CONNECT_GRACE_MS: number = 20000;
 
 // ── 配色（iOS 浅色系统色）──
 const C_BG: string = '#F2F2F7';        // systemGroupedBackground
@@ -156,6 +160,8 @@ struct FieldRow {
   numeric: boolean = false;
   last: boolean = false;
   @Link value: string;
+  /** 内容变了就通知外面存盘。以前只有「保存修改」按钮会存，改了不点就白改。 */
+  onEdited: () => void = () => {};
 
   build() {
     Row() {
@@ -177,7 +183,10 @@ struct FieldRow {
         .type(this.password ? InputType.Password :
           (this.numeric ? InputType.Number : InputType.Normal))
         .showPasswordIcon(false)
-        .onChange((v: string) => { this.value = v; })
+        .onChange((v: string) => {
+          this.value = v;
+          this.onEdited();
+        })
     }
     .width('100%')
     .height(46)
@@ -193,7 +202,7 @@ struct Index {
   // ── 当前编辑中的配置字段（镜像当前 profile，改动后写回） ──
   @State serverHost: string = '';
   @State serverPort: string = '51820';
-  @State clientAddress: string = '10.0.0.2';
+  @State clientAddress: string = '';
   @State dnsServer: string = '1.1.1.1';
   @State clientPrivateKey: string = '';
   @State serverPublicKey: string = '';
@@ -229,7 +238,22 @@ struct Index {
   @State versionName: string = '1.1.0';
 
   private diagTimer: number = -1;
+  /** 表单自动保存的防抖定时器 */
+  private saveTimer: number = -1;
   private store: ProfileStore | null = null;
+  /**
+   * 配置是否已从 preferences 读回来。没读完时表单里全是初始值，
+   * 这时候任何 saveCurrent 都会把空表单当成「用户改过的配置」写回去。
+   */
+  private profilesLoaded: boolean = false;
+  /** 打开/切换配置时的快照，「还原」恢复到它 */
+  private baseline: WgProfile | null = null;
+  /**
+   * 本次点击「连接」的时刻。扩展冷启动要 1~3 秒，这段时间统计文件里还是上一轮
+   * 的内容，直接采信会让按钮先亮「已连接」再掉回去。只有 updatedAt 不早于它
+   * 的统计才算本轮的。纯显示用途，不参与任何隧道逻辑。
+   */
+  private connectAt: number = 0;
   private compactL: mediaquery.MediaQueryListener | null = null;
   private wideL: mediaquery.MediaQueryListener | null = null;
   // 上一次速率采样的计数与时间，用于差分
@@ -252,6 +276,10 @@ struct Index {
   aboutToDisappear(): void {
     this.stopDiagTimer();
     this.releaseMedia();
+    if (this.saveTimer >= 0) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = -1;
+    }
     this.saveCurrent();
   }
 
@@ -726,14 +754,22 @@ struct Index {
         .borderColor(C_HAIR)
 
         if (this.showParams) {
-          FieldRow({ label: '服务端地址', hint: 'IP 或域名', value: $serverHost })
-          FieldRow({ label: '端口', hint: '51820', value: $serverPort, numeric: true })
-          FieldRow({ label: '虚拟 IP', hint: '10.0.0.2', value: $clientAddress })
-          FieldRow({ label: 'DNS', hint: '1.1.1.1', value: $dnsServer })
-          FieldRow({ label: '分流网段', hint: '0.0.0.0/0', value: $allowedIps })
-          FieldRow({ label: '客户端私钥', hint: 'Base64', value: $clientPrivateKey, password: true })
-          FieldRow({ label: '服务端公钥', hint: 'Base64', value: $serverPublicKey })
-          FieldRow({ label: '预共享密钥', hint: '可留空', value: $presharedKey, password: true, last: true })
+          FieldRow({ label: '服务端地址', hint: 'IP 或域名', value: $serverHost,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '端口', hint: '如 51820', value: $serverPort, numeric: true,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '虚拟 IP', hint: '如 10.77.0.5', value: $clientAddress,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: 'DNS', hint: '如 1.1.1.1', value: $dnsServer,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '分流网段', hint: '如 0.0.0.0/0', value: $allowedIps,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '客户端私钥', hint: 'Base64', value: $clientPrivateKey, password: true,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '服务端公钥', hint: 'Base64', value: $serverPublicKey,
+            onEdited: () => { this.scheduleSave(); } })
+          FieldRow({ label: '预共享密钥', hint: '可留空', value: $presharedKey, password: true, last: true,
+            onEdited: () => { this.scheduleSave(); } })
 
           Row() {
             Button('保存修改')
@@ -744,7 +780,7 @@ struct Index {
               .fontColor('#FFFFFF')
               .backgroundColor(C_BLUE)
               .borderRadius(12)
-              .onClick(() => { this.saveCurrent(); })
+              .onClick(() => { this.saveFromButton(); })
             Button('还原')
               .height(44)
               .width(88)
@@ -1059,8 +1095,11 @@ struct Index {
         this.applyProfile(p);
       } else {
         this.applyProfile(this.findProfile(this.activeId));
-        this.appendLog('已加载 ' + this.profiles.length + ' 份配置');
+        this.appendLog('已加载 ' + this.profiles.length + ' 份配置 · 虚拟 IP ' +
+          (this.clientAddress !== '' ? this.clientAddress : '（空）'));
       }
+      // 从这里开始表单内容才是真实配置，允许写回
+      this.profilesLoaded = true;
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'load profiles failed: %{public}s', JSON.stringify(e));
     }
@@ -1105,6 +1144,24 @@ struct Index {
     this.serverPublicKey = p.serverPublicKey;
     this.presharedKey = p.presharedKey;
     this.allowedIps = p.allowedIps;
+    // 留一份「这次打开时的样子」，自动保存之后再点还原还能退回去
+    this.baseline = this.cloneProfile(p);
+  }
+
+  private cloneProfile(p: WgProfile): WgProfile {
+    return {
+      id: p.id,
+      name: p.name,
+      serverHost: p.serverHost,
+      serverPort: p.serverPort,
+      clientAddress: p.clientAddress,
+      dnsServer: p.dnsServer,
+      clientPrivateKey: p.clientPrivateKey,
+      serverPublicKey: p.serverPublicKey,
+      presharedKey: p.presharedKey,
+      allowedIps: p.allowedIps,
+      updatedAt: p.updatedAt,
+    };
   }
 
   private async persist(): Promise<void> {
@@ -1112,12 +1169,20 @@ struct Index {
       const store: ProfileStore = await this.getStore();
       await store.save(this.profiles, this.activeId);
     } catch (e) {
+      // 以前这里只写 hilog，界面上看不出来：用户以为改了、连上也正常
+      // （连接用的是内存里的表单值），可存储里还是旧值，重装/重启就打回原形。
       hilog.error(DOMAIN, TAG, 'persist failed: %{public}s', JSON.stringify(e));
+      this.appendLog('保存失败：' + JSON.stringify(e));
     }
   }
 
   /** 把表单内容写回当前 profile */
   private async saveCurrent(): Promise<void> {
+    // 配置还没加载完就写回，等于拿界面初始值覆盖真实配置（覆盖安装后
+    // 首次启动、页面被系统重建都会走到这里）。等加载完再保存。
+    if (!this.profilesLoaded) {
+      return;
+    }
     const idx: number = this.activeIndex();
     if (idx < 0) {
       return;
@@ -1125,7 +1190,13 @@ struct Index {
     const p: WgProfile = this.profiles[idx];
     p.serverHost = this.serverHost.trim();
     p.serverPort = this.serverPort;
-    p.clientAddress = this.clientAddress;
+    // 虚拟 IP 不接受空值覆盖：表单还没渲染出真实地址时写回，会把
+    // 10.77.0.5 这种真实地址换成空串，读回时又补成 10.0.0.2，于是
+    // 服务端按 allowed-ips 把这个 peer 的包全丢了。
+    const addr: string = this.clientAddress.trim();
+    if (addr !== '') {
+      p.clientAddress = addr;
+    }
     p.dnsServer = this.dnsServer;
     p.clientPrivateKey = this.clientPrivateKey;
     p.serverPublicKey = this.serverPublicKey;
@@ -1136,6 +1207,31 @@ struct Index {
     next[idx] = p;
     this.profiles = next;
     await this.persist();
+  }
+
+  /** 「保存修改」按钮：保存后给条回执，点了没反应最容易导致「以为存上了」 */
+  private async saveFromButton(): Promise<void> {
+    await this.saveCurrent();
+    const p: WgProfile = this.findProfile(this.activeId);
+    this.appendLog('已保存「' + p.name + '」虚拟 IP ' + (p.clientAddress !== '' ? p.clientAddress : '未填'));
+  }
+
+  /**
+   * 改完就存（防抖 600ms），不再依赖用户记得点「保存修改」。
+   * 以前改完直接退出、或者直接覆盖安装，进程一被杀这次修改就没了，
+   * 存储里留着的还是旧值 —— 下次启动自然又回到 10.0.0.2。
+   */
+  private scheduleSave(): void {
+    if (!this.profilesLoaded) {
+      return;
+    }
+    if (this.saveTimer >= 0) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = -1;
+      this.saveCurrent();
+    }, 600);
   }
 
   private async switchTo(id: string): Promise<void> {
@@ -1251,13 +1347,19 @@ struct Index {
     this.appendLog('已删除配置');
   }
 
-  private resetForm(): void {
+  private async resetForm(): Promise<void> {
     const idx: number = this.activeIndex();
     if (idx < 0) {
       return;
     }
-    this.applyProfile(this.profiles[idx]);
-    this.appendLog('已放弃未保存的修改');
+    // 现在改动会自动存盘，「还原」得同时把基线写回去才算真的撤销
+    if (this.baseline !== null) {
+      this.applyProfile(this.baseline);
+    } else {
+      this.applyProfile(this.profiles[idx]);
+    }
+    await this.saveCurrent();
+    this.appendLog('已还原到本次打开时的配置');
   }
 
   // ── 连接 / 断开 ──
@@ -1280,6 +1382,20 @@ struct Index {
       this.showParams = true;
       return;
     }
+    // 虚拟 IP 必须来自配置本身：它要和服务器上这个 peer 的 AllowedIPs 一致，
+    // 空着就连接只会得到「握手成功但一个字节都进不来」，不如在这里拦住。
+    if (this.clientAddress.trim() === '') {
+      this.appendLog('错误：请填写虚拟 IP（要和服务器上该 peer 的 AllowedIPs 一致）');
+      this.statusText = '缺少虚拟 IP';
+      this.showParams = true;
+      return;
+    }
+    if (this.allowedIps.trim() === '') {
+      this.appendLog('错误：请填写分流网段（AllowedIPs），例如 0.0.0.0/0');
+      this.statusText = '缺少分流网段';
+      this.showParams = true;
+      return;
+    }
     const port: number = parseInt(this.serverPort);
     if (isNaN(port) || port < 1 || port > 65535) {
       this.appendLog('错误：端口号无效（1-65535）');
@@ -1290,6 +1406,7 @@ struct Index {
 
     this.busy = true;
     this.statusText = '正在连接…';
+    this.connectAt = Date.now();
     this.appendLog('连接 ' + this.serverHost + ':' + this.serverPort +
       '（' + this.activeName() + '）');
     await this.saveCurrent();
@@ -1368,6 +1485,7 @@ struct Index {
         abilityName: 'WireGuardVpnExt',
       };
       await vpnExtension.stopVpnExtensionAbility(want);
+      this.connectAt = 0;
       this.isConnected = false;
       this.statusText = '已断开';
       this.appendLog('VPN 已停止');
@@ -1429,6 +1547,25 @@ struct Index {
       return;
     }
 
+    /*
+     * 只认本轮的统计。上一轮断开时留下的那份，时间戳早于 connectAt，里面的
+     * handshakes 是上一次的旧值——回填进来就会让按钮先亮「已连接」，等宽限期
+     * 过了又被打回「未连接」，再等扩展真正写出统计才又变「已连接」。这就是
+     * 「已连接 → 未连接 → 已连接」三连闪的来源，所以旧统计一个字段都不采信。
+     */
+    if (!this.isOwnStats(st)) {
+      // 宽限期内安静等扩展起身（启动慢时不闪），超时才认定这次没起来
+      if (reconcile && this.connectAt > 0 &&
+        Date.now() - this.connectAt > CONNECT_GRACE_MS) {
+        this.isConnected = false;
+        this.statusText = '未连接';
+        this.handshakes = 0;
+        this.resetSpeeds();
+        this.connectAt = 0;
+      }
+      return;
+    }
+
     this.txBytes = st.txBytes;
     this.rxBytes = st.rxBytes;
     this.handshakes = st.handshakes;
@@ -1467,13 +1604,33 @@ struct Index {
     if (fresh && st.running) {
       this.isConnected = true;
       this.statusText = st.connected ? '已连接' : '握手中';
+    } else if (this.connectAt > 0 && Date.now() - this.connectAt < CONNECT_GRACE_MS) {
+      // 本轮统计已写出但刚过期：多半是扩展正好在重启引擎/写盘撞车。
+      // 宽限期内保持「握手中」等下一拍，别在这一瞬间把按钮打回「未连接」。
+      this.isConnected = true;
+      this.statusText = '握手中';
     } else {
       this.isConnected = false;
       this.statusText = '未连接';
+      this.connectAt = 0;
       this.resetSpeeds();
       // 不停轮询：网络切换时扩展会原地重启引擎，统计文件有 1-2 秒过期，
       // 停了轮询就再也回不到「已连接」。用户主动断开时才 stopDiagTimer。
     }
+  }
+
+  /**
+   * 这份统计是不是「本轮」写的。
+   * 冷启动（connectAt=0）没有本轮可言，按文件内容判断隧道是否还在跑。
+   */
+  private isOwnStats(st: TunnelStats): boolean {
+    if (this.connectAt <= 0) {
+      return true;
+    }
+    if (!Number.isFinite(st.updatedAt) || st.updatedAt <= 0) {
+      return false;
+    }
+    return st.updatedAt + STATS_CLOCK_SLACK_MS >= this.connectAt;
   }
 
   /** 秒 → 「x分x秒」/「x秒」 */
@@ -1549,15 +1706,18 @@ struct Index {
           const p: WgProfile = emptyProfile(name);
           p.serverHost = config.serverHost;
           p.serverPort = config.serverPort;
-          p.clientAddress = config.clientAddress || '10.0.0.2';
-          p.dnsServer = config.dnsServer || '1.1.1.1';
+          p.clientAddress = config.clientAddress;
+          p.dnsServer = config.dnsServer;
           p.clientPrivateKey = config.privateKey || '';
           p.serverPublicKey = config.publicKey || '';
           p.presharedKey = config.presharedKey || '';
-          p.allowedIps = config.allowedIPs || '0.0.0.0/0';
+          p.allowedIps = config.allowedIPs !== undefined ? config.allowedIPs : '';
           await this.addProfile(p);
           imported++;
           this.appendLog('已导入「' + name + '」 ' + p.serverHost + ':' + p.serverPort);
+          if (p.clientAddress === '') {
+            this.appendLog('注意：「' + name + '」的配置文件里没有 Address，请在「虚拟 IP」里填服务端分配给它的地址');
+          }
         } catch (fileErr) {
           this.appendLog('读取失败：' + this.baseName(uri));
         }
@@ -1647,13 +1807,16 @@ struct Index {
     const p: WgProfile = emptyProfile(name);
     p.serverHost = config.serverHost;
     p.serverPort = config.serverPort;
-    p.clientAddress = config.clientAddress || '10.0.0.2';
-    p.dnsServer = config.dnsServer || '1.1.1.1';
+    p.clientAddress = config.clientAddress;
+    p.dnsServer = config.dnsServer;
     p.clientPrivateKey = config.privateKey || '';
     p.serverPublicKey = config.publicKey || '';
     p.presharedKey = config.presharedKey || '';
-    p.allowedIps = config.allowedIPs || '0.0.0.0/0';
+    p.allowedIps = config.allowedIPs !== undefined ? config.allowedIPs : '';
     await this.addProfile(p);
     this.appendLog('扫码已新增配置「' + name + '」');
+    if (p.clientAddress === '') {
+      this.appendLog('注意：扫码内容里没有 Address，请在「虚拟 IP」里填服务端分配给它的地址');
+    }
   }
 }

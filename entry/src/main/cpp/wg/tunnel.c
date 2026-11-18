@@ -516,7 +516,14 @@ int wg_tunnel_start(const wg_tunnel_config *cfg) {
     uint8_t local_pub[32];
 
     if (!cfg || !cfg->server_ip) return -22;
-    if (g_e.running) return -16;
+    /*
+     * 上一轮引擎还没收尾时不要直接拒绝。调用方拿到 -16 只会 tearDown 一次，
+     * 用户就得再点一遍「连接」。这里就地把旧的停掉再重建，把重试藏进引擎里。
+     */
+    if (g_e.running) {
+        logmsg(2, "engine already running, restarting");
+        wg_tunnel_stop();
+    }
 
     memset(&g_e, 0, sizeof(g_e));
     g_e.cfg = *cfg;

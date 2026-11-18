@@ -50,35 +50,45 @@ export function newProfileId(): string {
   return stamp + '-' + salt;
 }
 
+/**
+ * 一张白纸：除了 id 和名字，其它字段一律为空。
+ *
+ * 这里刻意不预填 51820 / 1.1.1.1 / 0.0.0.0/0 这类「常见值」。它们看起来贴心，
+ * 实际会让用户以为这些是自己配置里的数据；一旦和真实服务端不一致，排查半天
+ * 才发现是程序自己填的。配置只该来自配置文件本身。
+ */
 export function emptyProfile(name: string): WgProfile {
   return {
     id: newProfileId(),
     name: name,
     serverHost: '',
-    serverPort: '51820',
-    clientAddress: '10.0.0.2',
-    dnsServer: '1.1.1.1',
+    serverPort: '',
+    clientAddress: '',
+    dnsServer: '',
     clientPrivateKey: '',
     serverPublicKey: '',
     presharedKey: '',
-    allowedIps: '0.0.0.0/0',
+    allowedIps: '',
     updatedAt: Date.now(),
   };
 }
 
-/** 把可能来自旧版本 JSON 的残缺对象补全成合法 profile */
+/**
+ * 读取存储里的对象。只补 id 和名字（没有它们没法索引），
+ * 其余字段原样返回：存的是什么就读出什么，缺字段就是空，绝不代填。
+ */
 function normalize(raw: WgProfile): WgProfile {
   const p: WgProfile = emptyProfile('');
   p.id = (raw.id || '') !== '' ? raw.id : newProfileId();
   p.name = (raw.name || '') !== '' ? raw.name : '未命名配置';
   p.serverHost = raw.serverHost || '';
-  p.serverPort = raw.serverPort || '51820';
-  p.clientAddress = raw.clientAddress || '10.0.0.2';
-  p.dnsServer = raw.dnsServer || '1.1.1.1';
+  p.serverPort = raw.serverPort || '';
+  p.clientAddress = raw.clientAddress || '';
+  p.dnsServer = raw.dnsServer || '';
   p.clientPrivateKey = raw.clientPrivateKey || '';
   p.serverPublicKey = raw.serverPublicKey || '';
   p.presharedKey = raw.presharedKey || '';
-  p.allowedIps = raw.allowedIps || '0.0.0.0/0';
+  p.allowedIps = raw.allowedIps || '';
   p.updatedAt = raw.updatedAt > 0 ? raw.updatedAt : Date.now();
   return p;
 }
@@ -151,13 +161,13 @@ export class ProfileStore {
     }
     const p: WgProfile = emptyProfile('默认配置');
     p.serverHost = host;
-    p.serverPort = (await prefs.get('serverPort', '51820')) as string;
-    p.clientAddress = (await prefs.get('clientAddress', '10.0.0.2')) as string;
-    p.dnsServer = (await prefs.get('dnsServer', '1.1.1.1')) as string;
+    p.serverPort = (await prefs.get('serverPort', '')) as string;
+    p.clientAddress = (await prefs.get('clientAddress', '')) as string;
+    p.dnsServer = (await prefs.get('dnsServer', '')) as string;
     p.clientPrivateKey = (await prefs.get('clientPrivateKey', '')) as string;
     p.serverPublicKey = (await prefs.get('serverPublicKey', '')) as string;
     p.presharedKey = (await prefs.get('presharedKey', '')) as string;
-    p.allowedIps = (await prefs.get('allowedIps', '0.0.0.0/0')) as string;
+    p.allowedIps = (await prefs.get('allowedIps', '')) as string;
     p.updatedAt = Date.now();
     return p;
   }
