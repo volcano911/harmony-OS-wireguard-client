@@ -1,3 +1,5 @@
+> ✅ 已经在鸿蒙 7 华为 Pura X Max 真机上通过验证
+
 # HarmonyOS WireGuard Client
 
 面向 HarmonyOS NEXT（API 23，arm64）的 WireGuard 客户端。数据面完全跑在
